@@ -7,6 +7,7 @@ from __future__ import annotations
 # for more information.
 # This dummy hub always returns 3 rollers.
 import asyncio
+from collections.abc import Callable
 import random
 
 from homeassistant.core import HomeAssistant
@@ -26,18 +27,47 @@ class Hub:
         self._hass = hass
         self._name = inverter_id
         self._id = inverter_id.lower()
-        self.rollers = [
-            Roller(f"{self._id}_1", f"{self._name} 1", self),
-            Roller(f"{self._id}_2", f"{self._name} 2", self),
-            Roller(f"{self._id}_3", f"{self._name} 3", self),
-        ]
         self.online = True
-        self.inverter = Inverter(inverter_id, self._name, self)
+
+        self.devices = {}
+        self.devices["inverter"] = Inverter(inverter_id, self._name, self)
+        self.devices["battery"] = Battery(inverter_id, self._name, self)
+
+        self.energy_sum = 0
 
     @property
     def hub_id(self) -> str:
         """ID for solplanet hub."""
         return self._id
+
+    async def fetch_data(self) -> dict:
+        """Fetch data from the inverter API."""
+        self.energy_sum += 3
+        self.energy_sum %= 1000
+        print(self.energy_sum)
+        return {
+            "inverter": {
+                "power_in_solar": 100,
+                "power_in_battery": 100,
+                "current_in": 100,
+                "power_in": 100,
+                "total_energy_in": 100,
+                "solar_power_in": 100,
+                "battery_power_in": 100,
+                "current": random.randint(0, 100),
+                "voltage": random.randint(0, 100),
+            },
+            "battery": {
+                "energy_in_total": self.energy_sum,
+                "energy_out_total": self.energy_sum,
+                "current": random.randint(0, 100),
+                "voltage": random.randint(0, 100),
+                "power": random.randint(0, 100),
+                "state_of_charge": random.randint(0, 100),
+            },
+            "solar_all": {"voltage": 100, "current": 100, "power": 100},
+            "solar_1": {"voltage": 100, "current": 100, "power": 100},
+        }
 
     async def test_connection(self) -> bool:
         """Test connectivity to inverter is OK."""
@@ -45,138 +75,35 @@ class Hub:
         return True
 
 
-class Inverter:
-    def __init__(self, inverter_id: str, hub_name: str, hub: Hub) -> None:
-        self._id = f"{inverter_id}_inverter"
-        self.name = f"{hub_name} Inverter"
+class DeviceBase:
+    def __init__(self, device_id: str, name: str, hub: Hub):
+        self._id = device_id
+        self.name = name
         self.hub = hub
-        self._data = 123
-
-    def pull_data(self):
-        self._data = 432
-
-    @property
-    def inverter_id(self) -> str:
-        """Return ID for inverter device."""
-        return self._id
+        self._callbacks = set()
 
     @property
     def device_info(self):
         """Return information to link entities with the correct device."""
         return {
-            "identifiers": {(DOMAIN, self.inverter_id)},
+            "identifiers": {(DOMAIN, self._id)},
             "name": self.name,
-            "model": "Solplanet Inverter",
+            "model": "Solplanet",
             "manufacturer": self.hub.manufacturer,
         }
 
-    @property
-    def online(self) -> bool:
-        """Inverter is online."""
-        return True
 
-    @property
-    def power(self) -> float:
-        return self._data
+class Inverter(DeviceBase):
+    """Inverter information class."""
 
-    def register_callback(self, callback: Callable[[], None]) -> None:
-        """Register callback, called when Roller changes state."""
-        self._callbacks.add(callback)
-
-    def remove_callback(self, callback: Callable[[], None]) -> None:
-        """Remove previously registered callback."""
-        self._callbacks.discard(callback)
-
-    async def publish_updates(self) -> None:
-        """Schedule call all registered callbacks."""
-        self._current_position = self._target_position
-        for callback in self._callbacks:
-            callback()
+    def __init__(self, inverter_id: str, hub_name: str, hub: Hub) -> None:
+        """Initialize an inverter device."""
+        super().__init__(f"{inverter_id}_inverter", f"{hub_name} Inverter", hub)
 
 
-class Roller:
-    """Dummy roller (device for HA) for Hello World example."""
+class Battery(DeviceBase):
+    """Battery information class."""
 
-    def __init__(self, rollerid: str, name: str, hub: Hub) -> None:
-        """Init dummy roller."""
-        self._id = rollerid
-        self.hub = hub
-        self.name = name
-        self._callbacks = set()
-        self._loop = asyncio.get_event_loop()
-        self._target_position = 100
-        self._current_position = 100
-        # Reports if the roller is moving up or down.
-        # >0 is up, <0 is down. This very much just for demonstration.
-        self.moving = 0
-
-        # Some static information about this device
-        self.firmware_version = f"0.0.{random.randint(1, 9)}"
-        self.model = "Test Device"
-
-    @property
-    def roller_id(self) -> str:
-        """Return ID for roller."""
-        return self._id
-
-    @property
-    def position(self):
-        """Return position for roller."""
-        return self._current_position
-
-    async def set_position(self, position: int) -> None:
-        """Set dummy cover to the given position.
-
-        State is announced a random number of seconds later.
-        """
-        self._target_position = position
-
-        # Update the moving status, and broadcast the update
-        self.moving = position - 50
-        await self.publish_updates()
-
-        self._loop.create_task(self.delayed_update())
-
-    async def delayed_update(self) -> None:
-        """Publish updates, with a random delay to emulate interaction with device."""
-        await asyncio.sleep(random.randint(1, 10))
-        self.moving = 0
-        await self.publish_updates()
-
-    def register_callback(self, callback: Callable[[], None]) -> None:
-        """Register callback, called when Roller changes state."""
-        self._callbacks.add(callback)
-
-    def remove_callback(self, callback: Callable[[], None]) -> None:
-        """Remove previously registered callback."""
-        self._callbacks.discard(callback)
-
-    # In a real implementation, this library would call it's call backs when it was
-    # notified of any state changeds for the relevant device.
-    async def publish_updates(self) -> None:
-        """Schedule call all registered callbacks."""
-        self._current_position = self._target_position
-        for callback in self._callbacks:
-            callback()
-
-    @property
-    def online(self) -> float:
-        """Roller is online."""
-        # The dummy roller is offline about 10% of the time. Returns True if online,
-        # False if offline.
-        return random.random() > 0.1
-
-    @property
-    def battery_level(self) -> int:
-        """Battery level as a percentage."""
-        return random.randint(0, 100)
-
-    @property
-    def battery_voltage(self) -> float:
-        """Return a random voltage roughly that of a 12v battery."""
-        return round(random.random() * 3 + 10, 2)
-
-    @property
-    def illuminance(self) -> int:
-        """Return a sample illuminance in lux."""
-        return random.randint(0, 500)
+    def __init__(self, inverter_id: str, hub_name: str, hub: Hub) -> None:
+        """Initialize a battery device."""
+        super().__init__(f"{inverter_id}_battery", f"{hub_name} Battery", hub)
