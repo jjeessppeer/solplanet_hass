@@ -1,0 +1,1 @@
+Solplanet Home Assistant integration

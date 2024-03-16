@@ -1,0 +1,21 @@
+{
+  "title": "Solplanet",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Solplanet setup",
+        "description": "The serial number can be found on the side of the inverter.",
+        "data": {
+          "host": "Inverter IP adress",
+          "inverter_id": "Inverter serial number"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to the inverter"
+    },
+    "abort": {
+      "already_configured": "Device is already configured"
+    }
+  }
+}
