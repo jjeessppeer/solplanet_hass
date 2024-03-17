@@ -5,27 +5,26 @@
 # to display it in the UI (for know types). The unit_of_measurement property tells HA
 # what the unit is, so it can display the correct range. For predefined types (such as
 # battery), the unit_of_measurement should match what's expected.
+# import async_timeout
+from asyncio import timeout
 from datetime import timedelta
 import logging
-import random
 
-import async_timeout
-
-from homeassistant.components.light import LightEntity
-from homeassistant.components.sensor import SensorDeviceClass
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
+from homeassistant.const import PERCENTAGE, UnitOfEnergy, UnitOfPower
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity import Entity
-from homeassistant.components.sensor import SensorEntity
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
     DataUpdateCoordinator,
     UpdateFailed,
 )
 
-from .const import DOMAIN, INVERTER_SENSORS, BATTERY_SENSORS
-from homeassistant.components.sensor.const import SensorStateClass
+from .const import DOMAIN, UPDATE_INTERVAL_SECONDS
 from .hub import Hub
-from homeassistant.const import UnitOfEnergy, UnitOfPower
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,36 +40,29 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     coord = Coordinator(hass, hub)
     await coord.async_config_entry_first_refresh()
 
-    def create_sensor_entity():
-        return Sensor()
-
     new_entities = []
     # for s in INVERTER_SENSORS + BATTERY_SENSORS:
     #     new_entities.append(create_sensor_entity(s, hub, coordinator))
     if hub.devices["inverter"] is not None:
         new_entities.append(VoltageSensor("Voltage", "inverter", "voltage", hub, coord))
         new_entities.append(CurrentSensor("Current", "inverter", "current", hub, coord))
+
     if hub.devices["battery"] is not None:
+        new_entities.append(EnergySensor("Energy In", "battery", "voltage", hub, coord))
+        new_entities.append(
+            EnergySensor("Energy Out", "battery", "voltage", hub, coord)
+        )
         new_entities.append(VoltageSensor("Voltage", "battery", "voltage", hub, coord))
         new_entities.append(CurrentSensor("Current", "battery", "current", hub, coord))
+        new_entities.append(PowerSensor("Power", "battery", "power", hub, coord))
         new_entities.append(
-            EnergySensor("Energy3", "battery", "energy_total", hub, coord)
+            ChargeSensor("State of Charge", "battery", "state_of_charge", hub, coord)
         )
 
+    # Meter sensors
+    new_entities.append(EnergySensor("Energy In", "meter", "voltage", hub, coord))
+
     async_add_entities(new_entities)
-
-
-def create_sensor_entity(sensor_config, hub, coordinator):
-    """Create a sensor entity from configuration."""
-    return Sensor(
-        sensor_config["name"],
-        sensor_config["device_key"],
-        sensor_config["data_key"],
-        sensor_config["unit"],
-        sensor_config["device_class"],
-        hub,
-        coordinator,
-    )
 
 
 class Coordinator(DataUpdateCoordinator):
@@ -79,16 +71,21 @@ class Coordinator(DataUpdateCoordinator):
     def __init__(self, hass: HomeAssistant, hub: Hub):
         """Initialize coordinator."""
         super().__init__(
-            hass, _LOGGER, name="Solplanet", update_interval=timedelta(seconds=1)
+            hass,
+            _LOGGER,
+            name="Solplanet",
+            update_interval=timedelta(seconds=UPDATE_INTERVAL_SECONDS),
         )
         self.hub = hub
 
     async def _async_update_data(self):
-        async with async_timeout.timeout(10):
+        async with timeout(10):
             return await self.hub.fetch_data()
 
 
 class Sensor(CoordinatorEntity, SensorEntity):
+    """Base sensor interacting with manager hub."""
+
     def __init__(
         self,
         name: str,
@@ -107,10 +104,10 @@ class Sensor(CoordinatorEntity, SensorEntity):
 
         self._hub = hub
 
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Handle updated data from the coordinator."""
-        self.async_write_ha_state()
+    # @callback
+    # def _handle_coordinator_update(self) -> None:
+    #     """Handle updated data from the coordinator."""
+    #     self.async_write_ha_state()
 
     @property
     def device_info(self):
@@ -123,6 +120,8 @@ class Sensor(CoordinatorEntity, SensorEntity):
         if self._device_key not in self.coordinator.data:
             return False
         if self._data_key not in self.coordinator.data[self._device_key]:
+            return False
+        if self.coordinator.data[self._device_key][self._data_key] is None:
             return False
         return True
 
@@ -152,17 +151,35 @@ class CurrentSensor(Sensor):
 
 class PowerSensor(Sensor):
     device_class = SensorDeviceClass.POWER
-    _attr_unit_of_measurement = UnitOfPower.KILO_WATT
+    _attr_native_unit_of_measurement = UnitOfPower.KILO_WATT
 
     def __init__(self, name, device_key, data_key, hub, coordinator):
         super().__init__(name, device_key, data_key, hub, coordinator)
 
 
 class EnergySensor(Sensor):
-    _attr_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    # _attr_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
+
+    def __init__(
+        self,
+        name,
+        device_key,
+        data_key,
+        hub,
+        coordinator,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+    ):
+        super().__init__(name, device_key, data_key, hub, coordinator)
+        if state_class:
+            self._attr_state_class = state_class
+
+
+class ChargeSensor(Sensor):
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_device_class = SensorDeviceClass.BATTERY
 
     def __init__(self, name, device_key, data_key, hub, coordinator):
         super().__init__(name, device_key, data_key, hub, coordinator)
