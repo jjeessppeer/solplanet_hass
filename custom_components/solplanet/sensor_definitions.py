@@ -50,7 +50,8 @@ class Sensor(CoordinatorEntity, SensorEntity):
         hub: Hub,
         coordinator: Coordinator,
         entity_category=None,
-    ):
+    ) -> None:
+        """Initialize sensor base."""
         super().__init__(coordinator)
 
         if entity_category:

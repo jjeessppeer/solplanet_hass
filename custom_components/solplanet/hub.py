@@ -66,6 +66,7 @@ class Hub:
             "current": battery_info["cb"],
             "voltage": battery_info["vb"],
             "power": battery_info["pb"],
+            "mode": "charging",
             "state_of_charge": battery_info["soc"],
         }
 
@@ -95,6 +96,9 @@ class Hub:
             "power_total": 10,
             "power_1": 10,
             "power_2": 10,
+            "energy_total": 10,
+            "energy_1": 10,
+            "energy_2": 10,
             "voltage_1": 10,
             "voltage_2": 10,
             "current_1": 10,
